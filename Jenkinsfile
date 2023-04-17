@@ -1,40 +1,32 @@
-node{
-     
-    stage('SCM Checkout'){
-        git url: 'https://github.com/MithunTechnologiesDevOps/java-web-app-docker.git',branch: 'master'
+pipeline {
+    agent any
+
+    environment {
+        NEXUS_URL = 'http://nexus.example.com'
+        NEXUS_CREDENTIALS_ID = 'nexus-credentials'
+        GCR_PROJECT_ID = 'rising-timing-383506'
+        GKE_CLUSTER_NAME = 'my-gke-cluster'
+        GKE_NAMESPACE = 'my-gke-namespace'
+        GKE_CREDENTIALS_ID = 'rising-timing-383506'
     }
     
-    stage(" Maven Clean Package"){
-      def mavenHome =  tool name: "Maven-3.5.6", type: "maven"
-      def mavenCMD = "${mavenHome}/bin/mvn"
-      sh "${mavenCMD} clean package"
-      
-    } 
     
-    
-    stage('Build Docker Image'){
-        sh 'docker build -t dockerhandson/java-web-app .'
-    }
-    
-    stage('Push Docker Image'){
-        withCredentials([string(credentialsId: 'Docker_Hub_Pwd', variable: 'Docker_Hub_Pwd')]) {
-          sh "docker login -u dockerhandson -p ${Docker_Hub_Pwd}"
+    stages {       
+        stage('Build') {
+            steps {
+                sh 'mvn clean package'
+            }
         }
-        sh 'docker push dockerhandson/java-web-app'
-     }
-     
-      stage('Run Docker Image In Dev Server'){
-        
-        def dockerRun = ' docker run  -d -p 8080:8080 --name java-web-app dockerhandson/java-web-app'
-         
-         sshagent(['DOCKER_SERVER']) {
-          sh 'ssh -o StrictHostKeyChecking=no ubuntu@172.31.20.72 docker stop java-web-app || true'
-          sh 'ssh  ubuntu@172.31.20.72 docker rm java-web-app || true'
-          sh 'ssh  ubuntu@172.31.20.72 docker rmi -f  $(docker images -q) || true'
-          sh "ssh  ubuntu@172.31.20.72 ${dockerRun}"
-       }
-       
+
+        stage('Build and push Docker image to GCR') {
+            steps {
+                withCredentials([gcpServiceAccount(credentialsId: GKE_CREDENTIALS_ID, jsonKeyVariable: 'GCP_SA_KEY')]) {
+                    sh "gcloud auth activate-service-account --key-file <(echo '$GCP_SA_KEY')"
+                    sh "gcloud auth configure-docker --quiet"
+                    sh "docker build -t gcr.io/${GCR_PROJECT_ID}/my-app:${BUILD_NUMBER} ."
+                    sh "docker push gcr.io/${GCR_PROJECT_ID}/my-app:${BUILD_NUMBER}"
+                }
+            }
+        }
     }
-     
-     
 }
